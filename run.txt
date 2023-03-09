@@ -1,0 +1,2 @@
+
+python3 app.py -i file:/home/real/sample/1.mp4 -p /opt/nvidia/deepstream/deepstream-6.1/lib/libnvds_amqp_proto.so -c /opt/nvidia/deepstream/deepstream-6.1/sources/deepstream_python_apps/apps/yolov5/cfg_amqp.txt -t test 

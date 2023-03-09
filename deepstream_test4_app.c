@@ -35,6 +35,8 @@
 
 #define MAX_DISPLAY_LEN 64
 #define MAX_TIME_STAMP_LEN 32
+#define TRACKER_CONFIG_FILE "ds_tracker_config.txt"
+#define MAX_TRACKING_ID_LEN 16
 
 #define PGIE_CLASS_ID_VEHICLE 0
 #define PGIE_CLASS_ID_PERSON 2
@@ -101,7 +103,126 @@ GOptionEntry entries[] = {
         NULL},
   {NULL}
 };
+#define CONFIG_GROUP_TRACKER "tracker"
+#define CONFIG_GROUP_TRACKER_WIDTH "tracker-width"
+#define CONFIG_GROUP_TRACKER_HEIGHT "tracker-height"
+#define CONFIG_GROUP_TRACKER_LL_CONFIG_FILE "ll-config-file"
+#define CONFIG_GROUP_TRACKER_LL_LIB_FILE "ll-lib-file"
+#define CONFIG_GROUP_TRACKER_ENABLE_BATCH_PROCESS "enable-batch-process"
+#define CONFIG_GPU_ID "gpu-id"
+#define CHECK_ERROR(error) \
+    if (error) { \
+        g_printerr ("Error while parsing config file: %s\n", error->message); \
+        goto done; \
+    }
+static gchar *
+get_absolute_file_path (gchar *cfg_file_path, gchar *file_path)
+{
+    gchar abs_cfg_path[PATH_MAX + 1];
+    gchar *abs_file_path;
+    gchar *delim;
 
+    if (file_path && file_path[0] == '/') {
+        return file_path;
+    }
+
+    if (!realpath (cfg_file_path, abs_cfg_path)) {
+        g_free (file_path);
+        return NULL;
+    }
+
+    // Return absolute path of config file if file_path is NULL.
+    if (!file_path) {
+        abs_file_path = g_strdup (abs_cfg_path);
+        return abs_file_path;
+    }
+
+    delim = g_strrstr (abs_cfg_path, "/");
+    *(delim + 1) = '\0';
+
+    abs_file_path = g_strconcat (abs_cfg_path, file_path, NULL);
+    g_free (file_path);
+
+    return abs_file_path;
+}
+
+static gboolean
+set_tracker_properties (GstElement *nvtracker)
+{
+    gboolean ret = FALSE;
+    GError *error = NULL;
+    gchar **keys = NULL;
+    gchar **key = NULL;
+    GKeyFile *key_file = g_key_file_new ();
+
+    if (!g_key_file_load_from_file (key_file, TRACKER_CONFIG_FILE, G_KEY_FILE_NONE,
+                                    &error)) {
+        g_printerr ("Failed to load config file: %s\n", error->message);
+        return FALSE;
+    }
+
+    keys = g_key_file_get_keys (key_file, CONFIG_GROUP_TRACKER, NULL, &error);
+    CHECK_ERROR (error);
+
+    for (key = keys; *key; key++) {
+        if (!g_strcmp0 (*key, CONFIG_GROUP_TRACKER_WIDTH)) {
+            gint width =
+                    g_key_file_get_integer (key_file, CONFIG_GROUP_TRACKER,
+                                            CONFIG_GROUP_TRACKER_WIDTH, &error);
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "tracker-width", width, NULL);
+        } else if (!g_strcmp0 (*key, CONFIG_GROUP_TRACKER_HEIGHT)) {
+            gint height =
+                    g_key_file_get_integer (key_file, CONFIG_GROUP_TRACKER,
+                                            CONFIG_GROUP_TRACKER_HEIGHT, &error);
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "tracker-height", height, NULL);
+        } else if (!g_strcmp0 (*key, CONFIG_GPU_ID)) {
+            guint gpu_id =
+                    g_key_file_get_integer (key_file, CONFIG_GROUP_TRACKER,
+                                            CONFIG_GPU_ID, &error);
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "gpu_id", gpu_id, NULL);
+        } else if (!g_strcmp0 (*key, CONFIG_GROUP_TRACKER_LL_CONFIG_FILE)) {
+            char* ll_config_file = get_absolute_file_path (TRACKER_CONFIG_FILE,
+                                                           g_key_file_get_string (key_file,
+                                                                                  CONFIG_GROUP_TRACKER,
+                                                                                  CONFIG_GROUP_TRACKER_LL_CONFIG_FILE, &error));
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "ll-config-file", ll_config_file, NULL);
+        } else if (!g_strcmp0 (*key, CONFIG_GROUP_TRACKER_LL_LIB_FILE)) {
+            char* ll_lib_file = get_absolute_file_path (TRACKER_CONFIG_FILE,
+                                                        g_key_file_get_string (key_file,
+                                                                               CONFIG_GROUP_TRACKER,
+                                                                               CONFIG_GROUP_TRACKER_LL_LIB_FILE, &error));
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "ll-lib-file", ll_lib_file, NULL);
+        } else if (!g_strcmp0 (*key, CONFIG_GROUP_TRACKER_ENABLE_BATCH_PROCESS)) {
+            gboolean enable_batch_process =
+                    g_key_file_get_integer (key_file, CONFIG_GROUP_TRACKER,
+                                            CONFIG_GROUP_TRACKER_ENABLE_BATCH_PROCESS, &error);
+            CHECK_ERROR (error);
+            g_object_set (G_OBJECT (nvtracker), "enable_batch_process",
+                          enable_batch_process, NULL);
+        } else {
+            g_printerr ("Unknown key '%s' for group [%s]", *key,
+                        CONFIG_GROUP_TRACKER);
+        }
+    }
+
+    ret = TRUE;
+    done:
+    if (error) {
+        g_error_free (error);
+    }
+    if (keys) {
+        g_strfreev (keys);
+    }
+    if (!ret) {
+        g_printerr ("%s failed", __func__);
+    }
+    return ret;
+}
 static void
 generate_ts_rfc3339 (char *buf, int buf_size)
 {
@@ -462,7 +583,7 @@ main (int argc, char *argv[])
 {
   GMainLoop *loop = NULL;
   GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
-      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv = NULL,
+      *decoder = NULL, *sink = NULL, *pgie = NULL, *tracker= NULL, *nvvidconv = NULL,
       *nvosd = NULL, *nvstreammux;
   GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
   GstElement *queue1 = NULL, *queue2 = NULL;
@@ -546,7 +667,9 @@ main (int argc, char *argv[])
     pgie = gst_element_factory_make ("nvinferserver", "primary-nvinference-engine");
   } else {
     pgie = gst_element_factory_make ("nvinfer", "primary-nvinference-engine");
-  }
+  };
+
+  tracker = gst_element_factory_make ("nvtracker", "tracker");
 
   /* Use convertor to convert from NV12 to RGBA as required by nvosd */
   nvvidconv = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
@@ -576,7 +699,7 @@ main (int argc, char *argv[])
     sink = gst_element_factory_make ("nveglglessink", "nvvideo-renderer");
   }
 
-  if (!pipeline || !source || !h264parser || !decoder || !nvstreammux || !pgie
+  if (!pipeline || !source || !h264parser || !decoder || !nvstreammux || !pgie || !tracker
       || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
       || !queue1 || !queue2 || !sink) {
     g_printerr ("One element could not be created. Exiting.\n");
@@ -618,7 +741,10 @@ main (int argc, char *argv[])
     /* Set all the necessary properties of the nvinfer element,
      * the necessary ones are : */
     g_object_set (G_OBJECT (pgie), "config-file-path", PGIE_CONFIG_FILE, NULL);
-
+    if (!set_tracker_properties(tracker)) {
+          g_printerr ("Failed to set tracker properties. Exiting.\n");
+          return -1;
+      }
     g_object_set (G_OBJECT (msgconv), "config", MSCONV_CONFIG_FILE, NULL);
     g_object_set (G_OBJECT (msgconv), "payload-type", schema_type, NULL);
     g_object_set (G_OBJECT (msgconv), "msg2p-newapi", msg2p_meta, NULL);
@@ -645,12 +771,12 @@ main (int argc, char *argv[])
   /* Set up the pipeline */
   /* we add all elements into the pipeline */
   gst_bin_add_many (GST_BIN (pipeline),
-      source, h264parser, decoder, nvstreammux, pgie,
+      source, h264parser, decoder, nvstreammux, pgie, tracker,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv, msgbroker, sink, NULL);
 
   /* we link the elements together */
   /* file-source -> h264-parser -> nvh264-decoder -> nvstreammux ->
-   * pgie -> nvvidconv -> nvosd -> tee -> video-renderer
+   * pgie -> tracker -> nvvidconv -> nvosd -> tee -> video-renderer
    *                                      |
    *                                      |-> msgconv -> msgbroker  */
 
@@ -679,7 +805,7 @@ main (int argc, char *argv[])
     return -1;
   }
 
-  if (!gst_element_link_many (nvstreammux, pgie, nvvidconv, nvosd, tee, NULL)) {
+  if (!gst_element_link_many (nvstreammux, pgie, tracker, nvvidconv, nvosd, tee, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
   }

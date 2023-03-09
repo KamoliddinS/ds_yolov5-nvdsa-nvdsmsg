@@ -21,7 +21,7 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-CUDA_VER?=11.8
+CUDA_VER?=12.1
 ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif

@@ -66,7 +66,7 @@ model-color-format=0
 custom-network-config=yolov5s.cfg
 model-file=yolov5s.wts
 # onnx-file=yolov8s.onnx
-#model-engine-file=model_b1_gpu0_fp16.engine
+model-engine-file=model_b1_gpu0_fp16.engine
 #model-engine-file=model_b12_gpu0_fp16.engine
 labelfile-path=labels.txt
 ## 0=FP32, 1=INT8, 2=FP16 mode

@@ -1,2 +1,2 @@
 
- ./deepstream-test4-app-i file:/opt/nvidia/deepstream/deepstream-6.2/samples/streams/sample_720p.mp4 -p /opt/nvidia/deepstream/deepstream-6.2/lib/libnvds_amqp_proto.so -c cfg_amqp.txt -t test
+ sudo ./deepstream-test4-app -i file:/opt/nvidia/deepstream/deepstream-6.2/samples/streams/sample_720p.mp4  -p /opt/nvidia/deepstream/deepstream-6.2/lib/libnvds_amqp_proto.so -c cfg_amqp.txt -t test

@@ -27,12 +27,18 @@
 #include <string.h>
 #include <time.h>
 #include <cuda_runtime_api.h>
-#include <sys/timeb.h>
+//#include <sys/timeb.h>
 #include <math.h>
+//#include <iostream>
+//#include <vector>
 #include "gstnvdsmeta.h"
 #include "nvdsmeta_schema.h"
 #include "nvds_yml_parser.h"
-
+//#include "gstnvdsmeta.h"
+//#include "nvds_analytics_meta.h"
+#ifndef PLATFORM_TEGRA
+#include "gst-nvmessage.h"
+#endif
 #define MAX_DISPLAY_LEN 64
 #define MAX_TIME_STAMP_LEN 32
 #define TRACKER_CONFIG_FILE "ds_tracker_config.txt"
@@ -52,10 +58,10 @@
 static gboolean PERF_MODE = FALSE;
 /* Muxer batch formation timeout, for e.g. 40 millisec. Should ideally be set
  * based on the fastest source's framerate. */
-#define MUXER_BATCH_TIMEOUT_USEC 40000
+#define MUXER_BATCH_TIMEOUT_USEC 4000000
 #define IS_YAML(file) (g_str_has_suffix (file, ".yml") || g_str_has_suffix (file, ".yaml"))
-#define TILED_OUTPUT_WIDTH 1280
-#define TILED_OUTPUT_HEIGHT 720
+#define TILED_OUTPUT_WIDTH 1920
+#define TILED_OUTPUT_HEIGHT 1080
 /* Check for parsing error. */
 #define RETURN_ON_PARSER_ERROR(parse_expr) \
   if (NVDS_YAML_PARSER_SUCCESS !=  parse_expr) { \
@@ -69,7 +75,6 @@ static gchar **input_file = NULL;
 static gchar *topic = NULL;
 static gchar *conn_str = NULL;
 static gchar *proto_lib = NULL;
-
 
 static gint schema_type = 0;
 static gint msg2p_meta = 0;
@@ -249,6 +254,97 @@ generate_ts_rfc3339(char *buf, int buf_size) {
     strncat(buf, strmsec, buf_size);
 }
 
+/* nvdsanalytics_src_pad_buffer_probe  will extract metadata received on tiler sink pad
+ * and extract nvanalytics metadata etc. */
+//static GstPadProbeReturn
+//nvdsanalytics_src_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
+//                                    gpointer u_data)
+//{
+//    GstBuffer *buf = (GstBuffer *) info->data;
+//    guint num_rects = 0;
+//    NvDsObjectMeta *obj_meta = NULL;
+//    guint vehicle_count = 0;
+//    guint person_count = 0;
+//    NvDsMetaList * l_frame = NULL;
+//    NvDsMetaList * l_obj = NULL;
+//    NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (buf);
+//    for (l_frame = batch_meta->frame_meta_list; l_frame != NULL;
+//         l_frame = l_frame->next) {
+//        NvDsFrameMeta *frame_meta = (NvDsFrameMeta *) (l_frame->data);
+//        std::stringstream out_string;
+//        vehicle_count = 0;
+//        num_rects = 0;
+//        person_count = 0;
+//        for (l_obj = frame_meta->obj_meta_list; l_obj != NULL;
+//             l_obj = l_obj->next) {
+//            obj_meta = (NvDsObjectMeta *) (l_obj->data);
+//            if (obj_meta->class_id == PGIE_CLASS_ID_VEHICLE) {
+//                vehicle_count++;
+//                num_rects++;
+//            }
+//            if (obj_meta->class_id == PGIE_CLASS_ID_PERSON) {
+//                person_count++;
+//                num_rects++;
+//            }
+//
+//            // Access attached user meta for each object
+//            for (NvDsMetaList *l_user_meta = obj_meta->obj_user_meta_list; l_user_meta != NULL;
+//                 l_user_meta = l_user_meta->next) {
+//                NvDsUserMeta *user_meta = (NvDsUserMeta *) (l_user_meta->data);
+//                if(user_meta->base_meta.meta_type == NVDS_USER_OBJ_META_NVDSANALYTICS)
+//                {
+//                    NvDsAnalyticsObjInfo * user_meta_data = (NvDsAnalyticsObjInfo *)user_meta->user_meta_data;
+//                    if (user_meta_data->dirStatus.length()){
+//                        g_print ("object %lu moving in %s\n", obj_meta->object_id, user_meta_data->dirStatus.c_str());
+//                    }
+//                }
+//            }
+//        }
+//
+//        /* Iterate user metadata in frames to search analytics metadata */
+//        for (NvDsMetaList * l_user = frame_meta->frame_user_meta_list;
+//             l_user != NULL; l_user = l_user->next) {
+//            NvDsUserMeta *user_meta = (NvDsUserMeta *) l_user->data;
+//            if (user_meta->base_meta.meta_type != NVDS_USER_FRAME_META_NVDSANALYTICS)
+//                continue;
+//
+//            /* convert to  metadata */
+//            NvDsAnalyticsFrameMeta *meta =
+//                    (NvDsAnalyticsFrameMeta *) user_meta->user_meta_data;
+//            /* Get the labels from nvdsanalytics config file */
+//            for (std::pair<std::string, uint32_t> status : meta->objInROIcnt){
+//                out_string << "Objs in ROI ";
+//                out_string << status.first;
+//                out_string << " = ";
+//                out_string << status.second;
+//            }
+//            for (std::pair<std::string, uint32_t> status : meta->objLCCumCnt){
+//                out_string << " LineCrossing Cumulative ";
+//                out_string << status.first;
+//                out_string << " = ";
+//                out_string << status.second;
+//            }
+//            for (std::pair<std::string, uint32_t> status : meta->objLCCurrCnt){
+//                out_string << " LineCrossing Current Frame ";
+//                out_string << status.first;
+//                out_string << " = ";
+//                out_string << status.second;
+//            }
+//            for (std::pair<std::string, bool> status : meta->ocStatus){
+//                out_string << " Overcrowding status ";
+//                out_string << status.first;
+//                out_string << " = ";
+//                out_string << status.second;
+//            }
+//        }
+//        g_print ("Frame Number = %d of Stream = %d, Number of objects = %d "
+//                 "Vehicle Count = %d Person Count = %d %s\n",
+//                 frame_meta->frame_num, frame_meta->pad_index,
+//                 num_rects, vehicle_count, person_count, out_string.str().c_str());
+//    }
+//    return GST_PAD_PROBE_OK;
+//}
+
 static gpointer
 meta_copy_func(gpointer data, gpointer user_data) {
     NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
@@ -308,11 +404,11 @@ meta_copy_func(gpointer data, gpointer user_data) {
                 obj->hair = g_strdup(srcObj->hair);
             if (srcObj->apparel)
                 obj->apparel = g_strdup(srcObj->apparel);
+
             dstMeta->extMsg = obj;
             dstMeta->extMsgSize = sizeof(NvDsPersonObject);
         }
     }
-
     return dstMeta;
 }
 
@@ -687,6 +783,7 @@ main(int argc, char *argv[]) {
     GMainLoop *loop = NULL;
     GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
             *decoder = NULL, *sink = NULL, *tiler = NULL, *pgie = NULL, *tracker = NULL, *nvvidconv = NULL,
+            *nvdsanalytics = NULL,
             *nvosd = NULL, *nvstreammux;
     GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
     GstElement *queue1 = NULL, *queue2 = NULL;
@@ -807,6 +904,9 @@ main(int argc, char *argv[]) {
 
     tracker = gst_element_factory_make("nvtracker", "tracker");
 
+    /* Use nvdsanalytics to perform analytics on object */
+    nvdsanalytics = gst_element_factory_make ("nvdsanalytics", "nvdsanalytics");
+
     /* Use convertor to convert from NV12 to RGBA as required by nvosd */
     nvvidconv = gst_element_factory_make("nvvideoconvert", "nvvideo-converter");
 
@@ -838,12 +938,13 @@ main(int argc, char *argv[]) {
         sink = gst_element_factory_make("nveglglessink", "nvvideo-renderer");
     }
 
-    if (!pgie || !tracker || !tiler
+    if (!pgie || !tracker|| !nvdsanalytics|| !tiler
         || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
         || !queue1 || !queue2 || !sink) {
         g_printerr("One element could not be created. Exiting.\n");
         return -1;
     }
+
 
     if (argc > 1 && IS_YAML (argv[1])) {
         RETURN_ON_PARSER_ERROR(nvds_parse_file_source(source, argv[1], "source"));
@@ -880,6 +981,10 @@ main(int argc, char *argv[]) {
          * the necessary ones are : */
         g_object_set(G_OBJECT (pgie), "config-file-path", PGIE_CONFIG_FILE, NULL);
         g_object_get(G_OBJECT (pgie), "batch-size", &num_sources, NULL);
+        g_object_set (G_OBJECT (nvdsanalytics),
+                      "config-file", "config_nvdsanalytics.txt",
+                      NULL);
+
         tiler_rows = (guint) sqrt (num_sources);
         tiler_columns = (guint) ceil (1.0 * num_sources / tiler_rows);
         /* we set the tiler properties here */
@@ -919,16 +1024,16 @@ main(int argc, char *argv[]) {
     /* Set up the pipeline */
     /* we add all elements into the pipeline */
     gst_bin_add_many(GST_BIN (pipeline),
-                     pgie, tracker, tiler,
+                     pgie, tracker, nvdsanalytics, tiler,
                      nvvidconv, nvosd, tee, queue1, queue2, msgconv, msgbroker, sink, NULL);
 
     /* we link the elements together */
     /* file-source -> h264-parser -> nvh264-decoder -> nvstreammux ->
-     * pgie -> tracker -> tiler-> nvvidconv  -> nvosd -> tee -> video-renderer
-     *                                      |
-     *                                      |-> msgconv -> msgbroker  */
+     * pgie -> tracker -> nvdsanalytics ->tiler-> nvvidconv  -> nvosd -> tee -> video-renderer
+     *                                                                      |
+     *                                                                      |-> msgconv -> msgbroker  */
 
-    if (!gst_element_link_many(nvstreammux, pgie, tracker, tiler, nvvidconv, nvosd, tee, NULL)) {
+    if (!gst_element_link_many(nvstreammux, pgie, tracker, nvdsanalytics, tiler, nvvidconv, nvosd, tee, NULL)) {
         g_printerr("Elements could not be linked. Exiting.\n");
         return -1;
     }
